@@ -96,6 +96,62 @@ app.post("/call-lead", async (req, res) => {
 });
 
 /**
+ * POST /leads/bulk
+ * Save multiple leads to the database
+ */
+app.post("/leads/bulk", async (req, res) => {
+  try {
+    const { leads } = req.body;
+    if (!leads || !Array.isArray(leads) || leads.length === 0) {
+      return res.status(400).json({ success: false, message: "leads array is required" });
+    }
+
+    const operations = leads.map(lead => ({
+      updateOne: {
+        filter: { phoneNumber: lead.phoneNumber },
+        update: { $set: { name: lead.name, email: lead.email, phoneNumber: lead.phoneNumber } },
+        upsert: true
+      }
+    }));
+
+    const result = await Lead.bulkWrite(operations);
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully saved ${result.upsertedCount + result.modifiedCount} leads`,
+      data: result
+    });
+  } catch (error) {
+    console.error("Bulk save leads error:", error);
+    return res.status(500).json({ success: false, message: "Failed to save leads" });
+  }
+});
+
+/**
+ * DELETE /leads/:phoneNumber
+ * Delete a lead by phone number
+ */
+app.delete("/leads/:phoneNumber", async (req, res) => {
+  try {
+    const { phoneNumber } = req.params;
+    if (!phoneNumber) {
+      return res.status(400).json({ success: false, message: "phoneNumber is required" });
+    }
+
+    const result = await Lead.deleteOne({ phoneNumber });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: "Lead not found" });
+    }
+
+    return res.status(200).json({ success: true, message: "Lead deleted successfully" });
+  } catch (error) {
+    console.error("Delete lead error:", error);
+    return res.status(500).json({ success: false, message: "Failed to delete lead" });
+  }
+});
+
+/**
  * GET /leads
  * Fetch all leads with their latest calls
  */
@@ -273,65 +329,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`📞 Retell Call API running on port ${PORT}`);
 });
-
-
-
-// async function debugGetCall() {
-//   try {
-//     const callId = "call_a1ea162588da0e46014485d54aa";
-
-//     const callResponse = await retellClient.call.retrieve(callId);
-
-//     console.log("===== CALL META =====");
-//     console.log({
-//       call_id: callResponse.call_id,
-//       status: callResponse.call_status,
-//       duration_ms: callResponse.duration_ms,
-//       from: callResponse.call_type === 'phone_call' ? callResponse.from_number : undefined,
-//       to: callResponse.call_type === 'phone_call' ? callResponse.to_number : undefined,
-//     });
-
-//     console.log("\n===== COLLECTED DYNAMIC VARIABLES =====");
-//     console.log(callResponse.collected_dynamic_variables);
-
-//     console.log("\n===== CALL ANALYSIS =====");
-//     console.log(callResponse.call_analysis);
-
-//     console.log("\n===== TRANSCRIPT =====");
-//     console.log(callResponse.transcript);
-
-//   } catch (error) {
-//     console.error("Failed to retrieve call:", error);
-//   }
-// }
-
-// call it explicitly
-// debugGetCall();
-
-// Phone call response: {
-//   call_id: "call_a2ff263e57ad4d711fa8cd2bbc9",
-//   call_type: "phone_call",
-//   agent_id: "agent_79e638ba5680f8e8863983a4e6",
-//   agent_version: 4,
-//   agent_name: "Single-Prompt Agent",
-//   retell_llm_dynamic_variables: {
-//     name: "Pramit Manna",
-//     email: "pramitmanna19@gmail.com",
-//     phone_number: "+918777562720",
-//     subject: "condo",
-//   },
-//   custom_sip_headers: {},
-//   call_status: "registered",
-//   latency: {},
-//   call_cost: {
-//     product_costs: [],
-//     total_duration_seconds: 0,
-//     total_duration_unit_price: 0,
-//     combined_cost: 0,
-//   },
-//   data_storage_setting: "everything",
-//   opt_in_signed_url: false,
-//   from_number: "+14385331002",
-//   to_number: "+918777562720",
-//   direction: "outbound",
-// }
