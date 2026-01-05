@@ -6,6 +6,8 @@ import callRouter from "./routes/call.route";
 import leadRouter from "./routes/lead.route";
 import authRouter from "./routes/auth.route";
 import adminRouter from "./routes/admin.route";
+import webhookRouter from "./routes/webhook.route";
+
 
 dotenv.config();
 
@@ -20,8 +22,10 @@ app.use(cors({ origin: '*' }));
 
 app.use("/auth", authRouter);
 app.use("/admin", adminRouter);
+app.use("/webhook", webhookRouter);
 app.use("/call", callRouter);
 app.use("/leads", leadRouter);
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

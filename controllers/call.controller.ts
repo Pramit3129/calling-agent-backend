@@ -19,29 +19,26 @@ export class CallController {
             }
 
             let agentDoc;
-            console.log("Initiating call. agentId from body:", agentId);
-            console.log("Fallback AGENT_ID from env:", process.env.AGENT_ID);
-
             if (agentId) {
                 try {
                     agentDoc = await agentModel.findById(agentId);
-                    console.log("Found agent by ID:", agentDoc?._id);
                 } catch (e) {
                     console.error("Error finding agent by ID:", e);
                 }
             }
 
             if (!agentDoc && process.env.AGENT_ID) {
-                agentDoc = await agentModel.findOne({ retellAgentId: process.env.AGENT_ID });
-                console.log("Found agent by fallback ID:", agentDoc?._id);
+                try {
+                    agentDoc = await agentModel.findOne({ retellAgentId: process.env.AGENT_ID });
+                } catch (e) {
+                    console.error("Error finding agent by fallback ID:", e);
+                }
             }
 
             if (!agentDoc) {
-                console.error("Agent not found. agentId:", agentId, "env.AGENT_ID:", process.env.AGENT_ID);
                 return res.status(404).json({ success: false, message: "Agent not found or not configured" });
             }
 
-            // Check if user.agents includes agentDoc._id
             const userHasAccess = user.agents.some((id: any) => id.toString() === agentDoc._id.toString());
             if (!userHasAccess) {
                 return res.status(403).json({ success: false, message: "Access denied to this agent" });
@@ -49,15 +46,20 @@ export class CallController {
 
             const retellAgentId = agentDoc.retellAgentId;
 
-            // 1. Create or Update Lead
-            let lead = await Lead.findOne({ email, userId: user._id });
-            if (!lead) {
-                lead = new Lead({ name, email, phoneNumber, userId: user._id });
-                await lead.save();
-            } else {
-                lead.name = name;
-                lead.phoneNumber = phoneNumber;
-                await lead.save();
+            let lead;
+            try {
+                lead = await Lead.findOne({ email, userId: user._id });
+                if (!lead) {
+                    lead = new Lead({ name, email, phoneNumber, userId: user._id });
+                    await lead.save();
+                } else {
+                    lead.name = name;
+                    lead.phoneNumber = phoneNumber;
+                    await lead.save();
+                }
+            } catch (error) {
+                console.error("Database error handling lead:", error);
+                return res.status(500).json({ success: false, message: "Database error" });
             }
 
             const dateContext = getCanadaDateContext();
@@ -65,24 +67,29 @@ export class CallController {
             if (!fromNumber) {
                 return res.status(404).json({ success: false, message: "Agent phone number not found or not configured" });
             }
-            console.log("Agent Phone number: ", fromNumber);
-            const phoneCallResponse = await RetellService.createPhoneCall({
-                from_number: fromNumber,
-                to_number: phoneNumber,
-                override_agent_id: retellAgentId,
-                retell_llm_dynamic_variables: {
-                    name,
-                    email,
-                    phone_number: phoneNumber,
-                    subject: subject ?? "",
-                    today_day: dateContext.today_day,
-                    today_date: dateContext.today_date,
-                    today_iso: dateContext.today_iso,
-                    timezone: dateContext.timezone,
-                },
-            });
 
-            // 2. Create Call Record
+            let phoneCallResponse;
+            try {
+                phoneCallResponse = await RetellService.createPhoneCall({
+                    from_number: fromNumber,
+                    to_number: phoneNumber,
+                    override_agent_id: retellAgentId,
+                    retell_llm_dynamic_variables: {
+                        name,
+                        email,
+                        phone_number: phoneNumber,
+                        subject: subject ?? "",
+                        today_day: dateContext.today_day,
+                        today_date: dateContext.today_date,
+                        today_iso: dateContext.today_iso,
+                        timezone: dateContext.timezone,
+                    },
+                });
+            } catch (error) {
+                console.error("Retell API error:", error);
+                return res.status(500).json({ success: false, message: "Failed to initiate call with Retell" });
+            }
+
             try {
                 const newCall = new Call({
                     callId: phoneCallResponse.call_id,
@@ -110,6 +117,7 @@ export class CallController {
         }
     }
 
+
     static async getCallDetails(req: Request, res: Response) {
         try {
             const { callId } = req.params;
@@ -120,7 +128,13 @@ export class CallController {
                 });
             }
 
-            const callRecordData = await Call.findOne({ callId });
+            let callRecordData;
+            try {
+                callRecordData = await Call.findOne({ callId });
+            } catch (error) {
+                console.error("Database error finding call record:", error);
+            }
+
             if (callRecordData && callRecordData.analysis) {
                 const mappedData = {
                     call_id: callRecordData.callId,
@@ -142,23 +156,32 @@ export class CallController {
                 });
             }
 
-            const callResponse = await RetellService.getCallDetails(callId);
+            let callResponse;
+            try {
+                callResponse = await RetellService.getCallDetails(callId);
+            } catch (error) {
+                console.error("Retell API error fetching call details:", error);
+                return res.status(500).json({ success: false, message: "Failed to fetch call details from Retell" });
+            }
 
-            const callRecord = await Call.findOne({ callId });
-            if (callRecord) {
-                callRecord.status = callResponse.call_status;
-                callRecord.analysis = callResponse.call_analysis;
-                callRecord.transcript = callResponse.transcript;
-                callRecord.recordingUrl = callResponse.recording_url;
-                callRecord.durationMs = callResponse.duration_ms;
-                callRecord.cost = callResponse.call_cost?.combined_cost;
+            if (callRecordData) {
+                try {
+                    callRecordData.status = callResponse.call_status;
+                    callRecordData.analysis = callResponse.call_analysis;
+                    callRecordData.transcript = callResponse.transcript;
+                    callRecordData.recordingUrl = callResponse.recording_url;
+                    callRecordData.durationMs = callResponse.duration_ms;
+                    callRecordData.cost = callResponse.call_cost?.combined_cost;
 
-                if (callResponse.call_type === 'phone_call') {
-                    callRecord.fromNumber = callResponse.from_number;
-                    callRecord.toNumber = callResponse.to_number;
+                    if (callResponse.call_type === 'phone_call') {
+                        callRecordData.fromNumber = callResponse.from_number;
+                        callRecordData.toNumber = callResponse.to_number;
+                    }
+
+                    await callRecordData.save();
+                } catch (error) {
+                    console.error("Database error updating call record:", error);
                 }
-
-                await callRecord.save();
             }
 
             return res.status(200).json({
@@ -170,6 +193,7 @@ export class CallController {
             return res.status(500).json({ success: false, message: "Failed to fetch call details" });
         }
     }
+
 
     static async createBatchCall(req: Request, res: Response) {
         const from_number = process.env.AGENT_PH_NUMBER;
@@ -186,9 +210,17 @@ export class CallController {
 
             let agentDoc;
             if (agentId) {
-                agentDoc = await agentModel.findById(agentId);
+                try {
+                    agentDoc = await agentModel.findById(agentId);
+                } catch (e) {
+                    console.error("Error finding agent by ID:", e);
+                }
             } else if (process.env.AGENT_ID) {
-                agentDoc = await agentModel.findOne({ retellAgentId: process.env.AGENT_ID });
+                try {
+                    agentDoc = await agentModel.findOne({ retellAgentId: process.env.AGENT_ID });
+                } catch (e) {
+                    console.error("Error finding agent by fallback ID:", e);
+                }
             }
 
             if (!agentDoc) {
@@ -210,25 +242,29 @@ export class CallController {
 
                 if (!phoneNumber) continue;
 
-                let lead = await Lead.findOne({ phoneNumber, userId: user._id });
-                if (!lead) {
-                    lead = new Lead({ name, email, phoneNumber, userId: user._id });
-                    await lead.save();
-                } else {
-                    lead.name = name || lead.name;
-                    lead.phoneNumber = phoneNumber;
-                    await lead.save();
-                }
-                tasks.push({
-                    to_number: phoneNumber,
-                    override_agent_id: retellAgentId,
-                    retell_llm_dynamic_variables: {
-                        name,
-                        email,
-                        phone_number: phoneNumber,
-                        ...dateContext
+                try {
+                    let lead = await Lead.findOne({ phoneNumber, userId: user._id });
+                    if (!lead) {
+                        lead = new Lead({ name, email, phoneNumber, userId: user._id });
+                        await lead.save();
+                    } else {
+                        lead.name = name || lead.name;
+                        lead.phoneNumber = phoneNumber;
+                        await lead.save();
                     }
-                });
+                    tasks.push({
+                        to_number: phoneNumber,
+                        override_agent_id: retellAgentId,
+                        retell_llm_dynamic_variables: {
+                            name,
+                            email,
+                            phone_number: phoneNumber,
+                            ...dateContext
+                        }
+                    });
+                } catch (error) {
+                    console.error("Database error handling lead in batch:", error);
+                }
             }
 
             if (tasks.length === 0) {
@@ -238,11 +274,17 @@ export class CallController {
                 });
             }
 
-            const batchCallResponse = await RetellService.createBatchCall({
-                from_number,
-                tasks,
-                trigger_timestamp,
-            });
+            let batchCallResponse;
+            try {
+                batchCallResponse = await RetellService.createBatchCall({
+                    from_number,
+                    tasks,
+                    trigger_timestamp,
+                });
+            } catch (error) {
+                console.error("Retell API error creating batch call:", error);
+                return res.status(500).json({ success: false, message: "Failed to create batch call with Retell" });
+            }
 
             return res.status(201).json({
                 success: true,
@@ -258,4 +300,5 @@ export class CallController {
             });
         }
     }
+
 }
