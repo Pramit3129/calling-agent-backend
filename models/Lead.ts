@@ -6,6 +6,7 @@ const leadSchema = new mongoose.Schema({
     phoneNumber: { type: String, required: true },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     createdAt: { type: Date, default: Date.now },
+    address: { type: String },
 });
 
 export const Lead = mongoose.model("Lead", leadSchema);

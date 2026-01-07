@@ -8,7 +8,7 @@ import { getCanadaDateContext } from "../utils/dateTime";
 export class CallController {
     static async initiateCall(req: Request, res: Response) {
         try {
-            const { name, email, phoneNumber, subject, agentId } = req.body;
+            const { name, email, phoneNumber, subject, agentId, address } = req.body;
             const user = req.user as any;
 
             if (!name || !email || !phoneNumber) {
@@ -45,6 +45,14 @@ export class CallController {
             }
 
             const retellAgentId = agentDoc.retellAgentId;
+            const isSellerAgent = agentDoc.name.toLowerCase().includes("seller");
+
+            if (isSellerAgent && !address) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Address is required for seller agents",
+                });
+            }
 
             let lead;
             try {
@@ -70,20 +78,26 @@ export class CallController {
 
             let phoneCallResponse;
             try {
+                const dynamicVariables: any = {
+                    name,
+                    email,
+                    phone_number: phoneNumber,
+                    subject: subject ?? "",
+                    today_day: dateContext.today_day,
+                    today_date: dateContext.today_date,
+                    today_iso: dateContext.today_iso,
+                    timezone: dateContext.timezone,
+                };
+
+                if (isSellerAgent) {
+                    dynamicVariables.address = address;
+                }
+
                 phoneCallResponse = await RetellService.createPhoneCall({
                     from_number: fromNumber,
                     to_number: phoneNumber,
                     override_agent_id: retellAgentId,
-                    retell_llm_dynamic_variables: {
-                        name,
-                        email,
-                        phone_number: phoneNumber,
-                        subject: subject ?? "",
-                        today_day: dateContext.today_day,
-                        today_date: dateContext.today_date,
-                        today_iso: dateContext.today_iso,
-                        timezone: dateContext.timezone,
-                    },
+                    retell_llm_dynamic_variables: dynamicVariables,
                 });
             } catch (error) {
                 console.error("Retell API error:", error);
@@ -233,14 +247,23 @@ export class CallController {
             }
 
             const retellAgentId = agentDoc.retellAgentId;
-
+            const isSellerAgent = agentDoc.name.toLowerCase().includes("seller");
 
             const tasks = [];
             const dateContext = getCanadaDateContext();
             for (const leadData of leads) {
-                const { name, email, phoneNumber } = leadData;
+                const { name, email, phoneNumber, address } = leadData;
 
                 if (!phoneNumber) continue;
+                if (isSellerAgent && !address) {
+                    // Skip or log error? For batch, maybe we should skip invalid ones or just proceed without address?
+                    // User said "mandatory fields", so we should probably skip or error.
+                    // Let's skip for now to avoid crashing the whole batch, but maybe logging would be better.
+                    // Or we can just let it fail at Retell if we wanted, but we are constructing the payload here.
+                    // Given the strict requirement, let's skip leads without address for seller agents.
+                    console.warn(`Skipping lead ${phoneNumber} because address is missing for seller agent.`);
+                    continue;
+                }
 
                 try {
                     let lead = await Lead.findOne({ phoneNumber, userId: user._id });
@@ -252,15 +275,22 @@ export class CallController {
                         lead.phoneNumber = phoneNumber;
                         await lead.save();
                     }
+
+                    const dynamicVariables: any = {
+                        name,
+                        email,
+                        phone_number: phoneNumber,
+                        ...dateContext
+                    };
+
+                    if (isSellerAgent) {
+                        dynamicVariables.address = address;
+                    }
+
                     tasks.push({
                         to_number: phoneNumber,
                         override_agent_id: retellAgentId,
-                        retell_llm_dynamic_variables: {
-                            name,
-                            email,
-                            phone_number: phoneNumber,
-                            ...dateContext
-                        }
+                        retell_llm_dynamic_variables: dynamicVariables
                     });
                 } catch (error) {
                     console.error("Database error handling lead in batch:", error);
@@ -270,7 +300,7 @@ export class CallController {
             if (tasks.length === 0) {
                 return res.status(400).json({
                     success: false,
-                    message: "No valid leads provided",
+                    message: "No valid leads provided (check if address is present for seller agents)",
                 });
             }
 
@@ -300,5 +330,4 @@ export class CallController {
             });
         }
     }
-
 }

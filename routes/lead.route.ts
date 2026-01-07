@@ -7,6 +7,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.post("/bulk", LeadController.bulkCreateLeads);
+router.put("/:phoneNumber", LeadController.updateLead);
 router.delete("/:phoneNumber", LeadController.deleteLead);
 router.get("/", LeadController.getLeads);
 
