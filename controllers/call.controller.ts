@@ -11,10 +11,10 @@ export class CallController {
             const { name, email, phoneNumber, subject, agentId, address } = req.body;
             const user = req.user as any;
 
-            if (!name || !email || !phoneNumber) {
+            if (!name || !phoneNumber) {
                 return res.status(400).json({
                     success: false,
-                    message: "name, email, and phoneNumber are required",
+                    message: "name, and phoneNumber are required",
                 });
             }
 
@@ -71,7 +71,7 @@ export class CallController {
             }
 
             const dateContext = getCanadaDateContext();
-            const fromNumber = process.env.AGENT_PH_NUMBER;
+            const fromNumber = agentDoc.phoneNumber || process.env.AGENT_PH_NUMBER;
             if (!fromNumber) {
                 return res.status(404).json({ success: false, message: "Agent phone number not found or not configured" });
             }
@@ -210,15 +210,14 @@ export class CallController {
 
 
     static async createBatchCall(req: Request, res: Response) {
-        const from_number = process.env.AGENT_PH_NUMBER;
         try {
             const { leads, trigger_timestamp, agentId } = req.body;
             const user = req.user as any;
 
-            if (!from_number || !leads || !Array.isArray(leads) || leads.length === 0) {
+            if (!leads || !Array.isArray(leads) || leads.length === 0) {
                 return res.status(400).json({
                     success: false,
-                    message: "from_number and leads (non-empty array) are required",
+                    message: "leads (non-empty array) are required",
                 });
             }
 
@@ -239,6 +238,12 @@ export class CallController {
 
             if (!agentDoc) {
                 return res.status(404).json({ success: false, message: "Agent not found or not configured" });
+            }
+
+            const from_number = agentDoc.phoneNumber || process.env.AGENT_PH_NUMBER;
+            
+            if (!from_number) {
+                return res.status(404).json({ success: false, message: "Agent phone number not found or not configured" });
             }
 
             const userHasAccess = user.agents.some((id: any) => id.toString() === agentDoc._id.toString());
