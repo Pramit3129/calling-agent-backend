@@ -1,6 +1,9 @@
 import type { Request, Response } from "express";
+import mongoose from "mongoose";
+
 import { RetellService } from "../services/retell.services";
 import { agentModel } from "../models/agent.model";
+import { BatchCallModel } from "../models/batchCall.model";
 import { Call } from "../models/Call";
 import { Lead } from "../models/Lead";
 import { getCanadaDateContext } from "../utils/dateTime";
@@ -53,12 +56,12 @@ export class CallController {
                     message: "Address is required for seller agents",
                 });
             }
-
+            const leadType = isSellerAgent ? "seller" : "buyer";
             let lead;
             try {
                 lead = await Lead.findOne({ email, userId: user._id });
                 if (!lead) {
-                    lead = new Lead({ name, email, phoneNumber, userId: user._id });
+                    lead = new Lead({ name, email, phoneNumber, userId: user._id, type: leadType });
                     await lead.save();
                 } else {
                     lead.name = name;
@@ -222,13 +225,15 @@ export class CallController {
             }
 
             let agentDoc;
-            if (agentId) {
+            if (agentId && mongoose.Types.ObjectId.isValid(agentId)) {
                 try {
                     agentDoc = await agentModel.findById(agentId);
                 } catch (e) {
                     console.error("Error finding agent by ID:", e);
                 }
-            } else if (process.env.AGENT_ID) {
+            }
+
+            if (!agentDoc && process.env.AGENT_ID) {
                 try {
                     agentDoc = await agentModel.findOne({ retellAgentId: process.env.AGENT_ID });
                 } catch (e) {
@@ -240,8 +245,16 @@ export class CallController {
                 return res.status(404).json({ success: false, message: "Agent not found or not configured" });
             }
 
+            const batchCall = new BatchCallModel({
+                realtorId: user._id,
+                agentId: agentDoc._id,
+                expected_calls: leads.length,
+            });
+            await batchCall.save();
+            const batchCallId = batchCall._id;
+
             const from_number = agentDoc.phoneNumber || process.env.AGENT_PH_NUMBER;
-            
+
             if (!from_number) {
                 return res.status(404).json({ success: false, message: "Agent phone number not found or not configured" });
             }
@@ -255,6 +268,8 @@ export class CallController {
             const isSellerAgent = agentDoc.name.toLowerCase().includes("seller");
 
             const tasks = [];
+            const leadIds = [];
+            const leadTypes = isSellerAgent ? "seller" : "buyer";
             const dateContext = getCanadaDateContext();
             for (const leadData of leads) {
                 const { name, email, phoneNumber, address } = leadData;
@@ -273,11 +288,12 @@ export class CallController {
                 try {
                     let lead = await Lead.findOne({ phoneNumber, userId: user._id });
                     if (!lead) {
-                        lead = new Lead({ name, email, phoneNumber, userId: user._id });
+                        lead = new Lead({ name, email, phoneNumber, userId: user._id, type: leadTypes });
                         await lead.save();
                     } else {
                         lead.name = name || lead.name;
                         lead.phoneNumber = phoneNumber;
+                        lead.type = leadTypes;
                         await lead.save();
                     }
 
@@ -291,15 +307,27 @@ export class CallController {
                     if (isSellerAgent) {
                         dynamicVariables.address = address;
                     }
-
+                    leadIds.push(lead._id);
                     tasks.push({
                         to_number: phoneNumber,
                         override_agent_id: retellAgentId,
+                        metadata: {
+                            batchCallId: batchCallId,
+                            leadId: lead._id
+                        },
                         retell_llm_dynamic_variables: dynamicVariables
                     });
                 } catch (error) {
                     console.error("Database error handling lead in batch:", error);
                 }
+            }
+
+            batchCall.leadIds = leadIds;
+            try {
+                await batchCall.save();
+            } catch (e) {
+                console.error("Database error saving batch call:", e);
+                return res.status(500).json({ success: false, message: "Failed to save leads in batch call" });
             }
 
             if (tasks.length === 0) {

@@ -65,5 +65,56 @@ export class EmailService {
             throw error;
         }
     }
+    static async sendBatchCallReport(userEmail: string, report: any) {
+        try {
+            const reportEntries = Object.entries(report);
+
+            const tableRows = reportEntries.map(([phoneNumber, data]: [string, any]) => {
+                const { callDetails, leadDetails } = data;
+                return `
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${leadDetails.name}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${phoneNumber}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${callDetails.status || 'N/A'}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${callDetails.semtiment || 'N/A'}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${callDetails.analysis || 'N/A'}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${callDetails.followUp || ''}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            const htmlContent = `
+                <h2>Batch Call Report</h2>
+                <p>Total Leads: ${reportEntries.length}</p>
+                <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif;">
+                    <thead>
+                        <tr style="background-color: #f2f2f2;">
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Lead Name</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Phone Number</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Status</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Sentiment</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Summary</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Follow-up</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows}
+                    </tbody>
+                </table>
+            `;
+
+            const data = await resend.emails.send({
+                from: MAIL_FROM,
+                to: userEmail,
+                subject: `Batch Call Report - ${new Date().toLocaleDateString()}`,
+                html: htmlContent,
+            });
+
+            return data;
+        } catch (error) {
+            console.error("Error sending batch call report email:", error);
+            throw error;
+        }
+    }
 
 }
