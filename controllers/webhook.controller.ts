@@ -3,9 +3,13 @@ import { Call } from "../models/Call";
 import { Lead } from "../models/Lead";
 import { EmailService } from "../services/email.service";
 import { userModel } from "../models/user.model";
+import { BatchCallModel } from "../models/batchCall.model";
+import { generateReport } from "../utils/generateReport";
 
 export class WebhookController {
     static async handleRetellWebhook(req: Request, res: Response) {
+        console.log("Webhook received");
+        // console.log(req.body);
         try {
             const { event, call } = req.body;
             const call_id = call?.call_id;
@@ -19,6 +23,64 @@ export class WebhookController {
                 return res.status(400).json({ message: "Invalid payload" });
             }
 
+            const batchCallId = call?.metadata?.batchCallId;
+            const isBatchCallData = batchCallId ? true : false;
+            let leadId;
+            if (isBatchCallData) {
+                leadId = call?.metadata?.leadId;
+                try {
+
+                    const callRecord = new Call({
+                        callId: call_id,
+                        leadId: leadId,
+                        analysis: call_analysis,
+                        transcript: call?.transcript,
+                        recordingUrl: call?.recording_url,
+                        durationMs: call?.duration_ms,
+                        cost: call?.cost,
+                        fromNumber: call?.from_number,
+                        toNumber: call?.to_number,
+                        status: call?.call_status || "completed",
+                        createdAt: new Date(),
+                    });
+                    try {
+                        await callRecord.save();
+                    } catch (e) {
+                        console.error("Database error saving call record:", e);
+
+                        // Continue with email sending even if save fails, or decide based on business logic
+                    }
+
+                    const batchCall = await BatchCallModel.findOneAndUpdate(
+                        { _id: batchCallId },
+                        { $inc: { calls_done: 1 } },
+                        { new: true }
+                    );
+                    if (batchCall && batchCall.calls_done === batchCall.expected_calls) {
+                        await BatchCallModel.updateOne({ _id: batchCallId }, { status: "completed" });
+
+                        const report = await generateReport(batchCallId);
+                        console.log("Batch call completed");
+                        console.log(`report: ${JSON.stringify(report, null, 2)}`);
+
+                        try {
+                            const user = await userModel.findById(batchCall.realtorId);
+                            if (user) {
+                                await EmailService.sendBatchCallReport(user.email, report);
+                                console.log(`Batch report email sent to ${user.email}`);
+                            } else {
+                                console.error("User not found for batch call report email");
+                            }
+                        } catch (emailError) {
+                            console.error("Error sending batch report email:", emailError);
+                        }
+                    }
+                    return res.status(200).json({ success: true, message: "Webhook processed successfully" });
+
+                } catch (e) {
+                    console.error("Database error saving call record for batch call:", e);
+                }
+            }
 
             let callRecord;
             try {
@@ -70,10 +132,9 @@ export class WebhookController {
             const { custom_analysis_data } = call_analysis;
 
             try {
-                // Send Report to User
+
                 await EmailService.sendUserCallReport(user.email, lead.name, call_analysis);
 
-                // Send Follow-up Info to User
                 if (custom_analysis_data) {
                     await EmailService.sendLeadFollowUpInfoToUser(
                         user.email,

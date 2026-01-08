@@ -12,13 +12,27 @@ export class LeadController {
             }
 
             const user = req.user as any;
-            const operations = leads.map(lead => ({
-                updateOne: {
-                    filter: { phoneNumber: lead.phoneNumber, userId: user._id },
-                    update: { $set: { name: lead.name, email: lead.email, phoneNumber: lead.phoneNumber, userId: user._id } },
-                    upsert: true
+            const operations = leads.map(lead => {
+                const updateData: any = {
+                    name: lead.name,
+                    phoneNumber: lead.phoneNumber,
+                    userId: user._id
+                };
+
+                if (lead.email && lead.email.trim() !== "") {
+                    updateData.email = lead.email;
+                } else {
+                    updateData.email = undefined;
                 }
-            }));
+
+                return {
+                    updateOne: {
+                        filter: { phoneNumber: lead.phoneNumber, userId: user._id },
+                        update: { $set: updateData },
+                        upsert: true
+                    }
+                };
+            });
 
             const result = await Lead.bulkWrite(operations);
 
