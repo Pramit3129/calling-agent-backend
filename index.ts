@@ -8,6 +8,7 @@ import authRouter from "./routes/auth.route";
 import adminRouter from "./routes/admin.route";
 import webhookRouter from "./routes/webhook.route";
 import scheduleCallRouter from "./routes/scheduleCall.route.ts";
+import demoRouter from "./routes/demo.route.ts";
 
 dotenv.config();
 
@@ -27,6 +28,7 @@ app.use("/webhook", webhookRouter);
 app.use("/call", callRouter);
 app.use("/leads", leadRouter);
 app.use("/schedule-call", scheduleCallRouter)
+app.use("/demo", demoRouter)
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
