@@ -24,10 +24,17 @@ const worker = new Worker('call-schedule-queue', async (job) => {
 
         // TODO: Realty Genie Call lead logic
         try {
+            const agentId = process.env.AGENT_POC;
+            if (!agentId) {
+                console.error("agentId missing in environment variables");
+                return;
+            } else {
+                console.log('agentId', agentId);
+            }
             const phoneCallResponse = await RetellService.createPhoneCall({
                 from_number: job.data.fromNumber,
                 to_number: job.data.phNo,
-                override_agent_id: process.env.AGENT_POC,
+                override_agent_id: agentId,
                 metadata: job.data.metadata
             });
             console.log(phoneCallResponse);
