@@ -27,7 +27,7 @@ const worker = new Worker('call-schedule-queue', async (job) => {
             const phoneCallResponse = await RetellService.createPhoneCall({
                 from_number: job.data.fromNumber,
                 to_number: job.data.phNo,
-                override_agent_id: process.env.AGENT_ID,
+                override_agent_id: process.env.AGENT_POC,
                 metadata: job.data.metadata
             });
             console.log(phoneCallResponse);
