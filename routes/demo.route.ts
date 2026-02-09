@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { RetellService } from "../services/retell.services";
 import { getCanadaDateContext } from "../utils/dateTime";
-
+import { PlatformLead } from '../models/platformLead.model'
 import { rateLimit } from "express-rate-limit";
 
 const router = Router();
@@ -17,6 +17,14 @@ const limiter = rateLimit({
 router.post("/createCall", limiter, async (req, res) => {
     try {
         const { name, email, toNumber, fromNumber, retellAgentId } = req.body;
+        if (!name || !email || !toNumber || !fromNumber || !retellAgentId) {
+            return res.status(400).json({
+                success: false,
+                message: "name, email, toNumber, fromNumber, and retellAgentId are required",
+            });
+        }
+        const newLeadForPlatform = new PlatformLead({ name, email, phoneNumber: toNumber });
+        await newLeadForPlatform.save();
         let phoneCallResponse;
         const dateContext = getCanadaDateContext();
         try {
