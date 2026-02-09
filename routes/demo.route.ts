@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { RetellService } from "../services/retell.services";
 import { getCanadaDateContext } from "../utils/dateTime";
-
+import { PlatformLead } from '../models/platformLead.model'
 import { rateLimit } from "express-rate-limit";
 
 const router = Router();
@@ -17,6 +17,53 @@ const limiter = rateLimit({
 router.post("/createCall", limiter, async (req, res) => {
     try {
         const { name, email, toNumber, fromNumber, retellAgentId } = req.body;
+        if (!name || !email || !toNumber || !fromNumber || !retellAgentId) {
+            return res.status(400).json({
+                success: false,
+                message: "name, email, toNumber, fromNumber, and retellAgentId are required",
+            });
+        }
+        const updatedLead = await PlatformLead.findOneAndUpdate(
+            { email, phoneNumber: toNumber, trialLeft: { $gt: 0 } },
+            { $inc: { trialLeft: -1 } },
+            { new: true }
+        );
+
+        if (updatedLead) {
+            console.log("Lead already exists");
+        } else {
+            const existingLead = await PlatformLead.findOne({ email, phoneNumber: toNumber });
+            if (existingLead) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Trial limit reached, Please contact us for more usage",
+                });
+            } else {
+                try {
+                    const newLeadForPlatform = new PlatformLead({ name, email, phoneNumber: toNumber, trialLeft: 5 });
+                    await newLeadForPlatform.save();
+                } catch (error: any) {
+                    if (error.code === 11000) {
+                        const retryUpdate = await PlatformLead.findOneAndUpdate(
+                            { email, phoneNumber: toNumber, trialLeft: { $gt: 0 } },
+                            { $inc: { trialLeft: -1 } },
+                            { new: true }
+                        );
+                        if (!retryUpdate) {
+                            const checkLead = await PlatformLead.findOne({ email, phoneNumber: toNumber });
+                            if (checkLead && checkLead.trialLeft === 0) {
+                                return res.status(400).json({
+                                    success: false,
+                                    message: "Trial limit reached, Please contact us for more usage",
+                                });
+                            }
+                        }
+                    } else {
+                        throw error;
+                    }
+                }
+            }
+        }
         let phoneCallResponse;
         const dateContext = getCanadaDateContext();
         try {
