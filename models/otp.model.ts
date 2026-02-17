@@ -16,6 +16,11 @@ const otpSchema = new mongoose.Schema({
     expiresAt: {
         type: Date,
         default: () => new Date(Date.now() + 600000)
+    },
+    leadId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "PlatformLead",
+        required: true
     }
 })
 

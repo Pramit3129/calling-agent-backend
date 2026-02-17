@@ -28,6 +28,12 @@ class OTPServices {
                 return res.status(400).json({ message: "Email is required" });
             }
 
+            const user = await PlatformLead.findOneAndUpdate(
+                { email },
+                { $setOnInsert: { email, trialLeft: 5 } },
+                { upsert: true, new: true }
+            );
+
 
             const otp = Math.floor(100000 + Math.random() * 900000);
 
@@ -35,6 +41,8 @@ class OTPServices {
                 { email },
                 {
                     otp,
+                    email,
+                    leadId: user._id,
                     createdAt: new Date(),
                     expiresAt: new Date(Date.now() + 10 * 60 * 1000),
                 },
@@ -74,16 +82,26 @@ class OTPServices {
             const storedOtp = await OtpModel.findOne({
                 email,
                 otp: Number(otp),
+                expiresAt: { $gt: new Date() },
             });
 
-            if (!storedOtp || storedOtp.expiresAt < new Date()) {
+            if (!storedOtp) {
                 return res.status(400).json({
                     message: "Otp invalid or expired"
                 });
             }
 
+            await OtpModel.deleteOne({ _id: storedOtp._id });
+
+            const token = jwt.sign(
+                { email },
+                process.env.JWT_SECRET || "secret",
+                { expiresIn: "10m" }
+            );
+
             return res.status(200).json({
-                message: "Otp verified successfully"
+                message: "Otp verified successfully",
+                token
             });
 
         } catch (e) {
@@ -96,12 +114,21 @@ class OTPServices {
 
 router.post("/createCall", limiter, async (req, res) => {
     try {
-        const { name, email, toNumber, fromNumber, retellAgentId, otp } = req.body;
-        if (!name || !email || !toNumber || !fromNumber || !retellAgentId || !otp) {
+        const { name, email, toNumber, fromNumber, retellAgentId, token } = req.body;
+        if (!name || !email || !toNumber || !fromNumber || !retellAgentId || !token) {
             return res.status(400).json({
                 success: false,
-                message: "name, email, toNumber, fromNumber, retellAgentId, and otp are required",
+                message: "name, email, toNumber, fromNumber, retellAgentId, and token are required",
             });
+        }
+
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || "secret") as { email: string };
+            if (decoded.email !== email) {
+                return res.status(401).json({ success: false, message: "Token email mismatch" });
+            }
+        } catch {
+            return res.status(401).json({ success: false, message: "Invalid or expired token" });
         }
         const updatedLead = await PlatformLead.findOneAndUpdate(
             { email, phoneNumber: toNumber, trialLeft: { $gt: 0 } },
