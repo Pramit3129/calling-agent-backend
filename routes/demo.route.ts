@@ -3,6 +3,10 @@ import { RetellService } from "../services/retell.services";
 import { getCanadaDateContext } from "../utils/dateTime";
 import { PlatformLead } from '../models/platformLead.model'
 import { rateLimit } from "express-rate-limit";
+import jwt from "jsonwebtoken";
+import { OtpModel } from "../models/otp.model";
+import { EmailService } from "../services/email.service";
+import type { Request, Response } from "express";
 
 const router = Router();
 
@@ -14,13 +18,89 @@ const limiter = rateLimit({
     legacyHeaders: false,
 });
 
+class OTPServices {
+
+    static async generateOtp(req: Request, res: Response) {
+        try {
+            const { email } = req.body;
+
+            if (!email) {
+                return res.status(400).json({ message: "Email is required" });
+            }
+
+
+            const otp = Math.floor(100000 + Math.random() * 900000);
+
+            await OtpModel.findOneAndUpdate(
+                { email },
+                {
+                    otp,
+                    createdAt: new Date(),
+                    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+                },
+                { upsert: true, new: true }
+            );
+            await EmailService.sendMailForOTP(email, "OTP for Forgot Password", `Your verification code for CallGenie is ${otp}`);
+
+            return res.status(200).json({
+                message: "If email exists, OTP sent"
+            });
+
+        } catch (e: any) {
+            return res.status(500).json({
+                message: "Failed to generate OTP",
+                error: e
+            });
+        }
+    }
+    static async verifyOtp(req: Request, res: Response) {
+        try {
+            const { email, otp } = req.body;
+
+            if (!email || !otp) {
+                return res.status(400).json({
+                    message: "Email and otp are required"
+                });
+            }
+
+            const user = await PlatformLead.findOne({ email });
+
+            if (!user) {
+                return res.status(400).json({
+                    message: "Invalid email or OTP"
+                });
+            }
+
+            const storedOtp = await OtpModel.findOne({
+                email,
+                otp: Number(otp),
+            });
+
+            if (!storedOtp || storedOtp.expiresAt < new Date()) {
+                return res.status(400).json({
+                    message: "Otp invalid or expired"
+                });
+            }
+
+            return res.status(200).json({
+                message: "Otp verified successfully"
+            });
+
+        } catch (e) {
+            return res.status(500).json({
+                message: "Failed to verify OTP"
+            });
+        }
+    }
+}
+
 router.post("/createCall", limiter, async (req, res) => {
     try {
-        const { name, email, toNumber, fromNumber, retellAgentId } = req.body;
-        if (!name || !email || !toNumber || !fromNumber || !retellAgentId) {
+        const { name, email, toNumber, fromNumber, retellAgentId, otp } = req.body;
+        if (!name || !email || !toNumber || !fromNumber || !retellAgentId || !otp) {
             return res.status(400).json({
                 success: false,
-                message: "name, email, toNumber, fromNumber, and retellAgentId are required",
+                message: "name, email, toNumber, fromNumber, retellAgentId, and otp are required",
             });
         }
         const updatedLead = await PlatformLead.findOneAndUpdate(
@@ -92,5 +172,9 @@ router.post("/createCall", limiter, async (req, res) => {
         res.status(500).json({ success: false, message: "Failed to create call" });
     }
 });
+
+router.post("/verifyEmail", OTPServices.generateOtp);
+router.post("/verifyOtp", OTPServices.verifyOtp);
+
 
 export default router;

@@ -134,4 +134,25 @@ export class EmailService {
         }
     }
 
+    static async sendMailForOTP(userEmail: string, subject: string, message: string) {
+        try {
+
+            const htmlContent = `
+                <h2>${message}</h2>
+            `;
+
+            const data = await resend.emails.send({
+                from: MAIL_FROM,
+                to: userEmail,
+                subject: subject,
+                html: htmlContent,
+            });
+
+            return data;
+        } catch (error) {
+            console.error("Error sending user report email:", error);
+            throw error;
+        }
+    }
+
 }
